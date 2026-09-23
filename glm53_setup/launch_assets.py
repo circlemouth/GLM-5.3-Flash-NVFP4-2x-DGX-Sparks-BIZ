@@ -78,6 +78,15 @@ def inspect(profile, config_path, rank, *, recovery=False):
         ).hexdigest(),
         "image": image["Id"],
         "revision": load_lock()["revision"],
+        "weight_overlay": (
+            {
+                "enabled": True,
+                "manifest_sha256": settings.weight_overlay(profile)["manifest_sha256"],
+                "donor_revision": settings.weight_overlay(profile)["donor_revision"],
+            }
+            if settings.weight_overlay(profile)
+            else {"enabled": False}
+        ),
         "model_config": sha(model / "config.json"),
         "weight_index": sha(index_path),
         "tokenizer_and_templates": {

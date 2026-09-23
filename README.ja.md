@@ -1,5 +1,9 @@
 # GLM-5.3-Flash-NVFP4-2x-DGX-Sparks-BIZ
 
+これは[BIZ](https://github.com/Bizuayeu/GLM-5.3-Flash-NVFP4-2x-DGX-Sparks-BIZ)の非公式forkで、[BF16 o_projの任意overlay](docs/abliteration.ja.md)を追加します。
+元の保守者による承認や、このforkの検証済みという表示ではありません。
+以下にあるBIZの実測は元の構成に対するもので、overlayの[検証状況](docs/abliteration-validation.ja.md)とは分けて扱います。
+
 **略称：NVFP4 BIZ**（引用は「NVFP4 BIZ 1.11.3」の形）。この配信スタックの呼び名で、NVIDIAの固定checkpointを配布のまま配信します。公開している任意設定の重みは **NVFP4 BIZ AXL**（AXL：attention projectionと `lm_head` をW4A16にしたもの。Hugging Faceの [Bizuayeu/GLM-5.3-Flash-NVFP4-attn-lmhead-W4A16](https://huggingface.co/Bizuayeu/GLM-5.3-Flash-NVFP4-attn-lmhead-W4A16) で、リポジトリ名は中身の記述）。リポジトリ名はどちらもそのままです。
 
 **BIZ**は保守者の印（Bizuayeu）であり、意図を示す語です。商用利用できるライセンス、資産の固定、検査結果の記録、戻せる運用を整えた**業務利用向けの構成**という意味で、製品ティア・サポート・保証・認定を意味しません。

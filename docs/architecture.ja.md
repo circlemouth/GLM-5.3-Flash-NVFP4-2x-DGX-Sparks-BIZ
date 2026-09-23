@@ -29,6 +29,7 @@
 | `glm53_setup/cluster.py`、`switch.py`、`launch_assets.py`、`fabric.py` | 両rankの停止前検査、所有権つきの切替・復旧、読み取り専用の起動識別情報、RoCEレール検査（[起動契約](launch-safety.ja.md)） |
 | `glm53_setup/model_http.py`、`io.py` | モデルAPIに限定しredirectに従わないHTTP transport、ローカル状態の永続化helper |
 | `glm53_setup/runtime/pinned_patch.py`、`patch_*.py` | image buildが当てるsource固定のvLLM patch群。`pinned_patch` が共通部分（固定ファイルのhash検査、`--package`／`--check` コマンド、package脇に書くrecord）を持ち、各 `patch_*` moduleは対象・pin・anchorだけを、逸脱した・適用済みのsourceを拒む純粋関数 `patch_text(text)` として述べる |
+| `glm53_setup/runtime/weight_overlay.py` | 固定版の本体とMTPの重みiteratorで、manifestを検証して任意のBF16テンソルを置換する。既定では無効（[overlay手順](abliteration.ja.md)） |
 | `glm53_setup/runtime/reference_attention.py`、`patch_nope_reference.py`、`fa2_attention.py` | 候補を保存するeagerなNoPE MLA参照計算、そのsource固定の導入、FA2のprefill経路（`runtime.fa2_attention`） |
 | `glm53_setup/runtime/candidate_order.py` | 共通のsparse-MLA境界での論理候補順序の正規化（[候補順序](candidate-order.ja.md)） |
 | `glm53_setup/runtime/moe_token_order.py`、`patch_moe_order.py` | Marlin MoE kernelの前で各expert内のtoken順を一つに固定（`runtime.canonical_moe_order`）と、そのsource固定patch |
@@ -52,7 +53,7 @@
 | `docker/` | imageの構築。base digestはビルドコマンドがロックから渡す |
 | `requirements/` | ホスト側ツールの固定した依存 |
 | `tests/` | CPU契約 |
-| `tools/` | `check_publication.py`（公開監査）、`release_notes.py`（tagが公開するChangelogの節）、`kernel_hashes.py`（indexerのkernelを両配信workerの中でhash）、`assess_benchmark.py`、`check_prefix_cache.py`、`decode_check.py`・`decode_divergence.py`・`weight_digest.py`（切替の後のdecode検査と重みのdigest、[起動契約](launch-safety.ja.md#切替の後のdecode検査)）、`nccl_probe.py`、`prepare_mtp_view.py` |
+| `tools/` | `check_publication.py`（公開監査）、`release_notes.py`（tagが公開するChangelogの節）、`kernel_hashes.py`（indexerのkernelを両配信workerの中でhash）、`assess_benchmark.py`、`check_prefix_cache.py`、`decode_check.py`・`decode_divergence.py`・`weight_digest.py`（切替の後のdecode検査と重みのdigest、[起動契約](launch-safety.ja.md#切替の後のdecode検査)）、`nccl_probe.py`、`prepare_mtp_view.py`、`prepare_abliteration.py`（検証付き部分取得） |
 | `.github/workflows/` | CI（LinuxとWindowsでのCPUテスト・Ruff・公開監査）と、tagで起動するGitHub Release |
 | `LICENSES/` | 上流ライセンス原文の保持 |
 | `state/`、`records/` | ローカルの可変状態と実験の証跡。配布対象外 |

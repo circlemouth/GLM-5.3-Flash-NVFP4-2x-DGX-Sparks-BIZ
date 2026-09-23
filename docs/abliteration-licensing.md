@@ -1,0 +1,11 @@
+# Overlay provenance and license boundaries
+
+The source in this fork retains BIZ's Apache-2.0 `LICENSE`, `NOTICE`, `LICENSES/` and third-party notices. New overlay code is marked SPDX Apache-2.0. Modified vLLM loader files retain their original Apache-2.0 notices and identify the fork's changes. BIZ's pre-existing MIT and Apache notices remain in force for their respective components.
+
+Weights are separate assets acquired by the operator and are not in the repository, image or release. The pinned [NVIDIA model card](https://huggingface.co/nvidia/GLM-5.3-Flash-NVFP4/blob/423acf37583782c51c142d145aef733d72943d93/README.md) labels its NVFP4 checkpoint MIT and expressly describes commercial and non-commercial use. Its pinned snapshot has no standalone LICENSE file. NVIDIA identifies [Z.AI's GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) as the parent; that repository includes an MIT license. Preserve the applicable copyright, permission and disclaimer notices when redistributing any weights.
+
+The optional donor is [Dealign's immutable revision `745aac2…`](https://huggingface.co/dealignai/GLM-5.3-Flash-UNCENSORED-NVFP4/tree/745aac2ff0f10acf961f396df3f9418598aa7327). Its [LICENSE](https://huggingface.co/dealignai/GLM-5.3-Flash-UNCENSORED-NVFP4/blob/745aac2ff0f10acf961f396df3f9418598aa7327/LICENSE) is MIT and carries a Z.AI copyright notice; the model card also labels the checkpoint MIT. The card does not document a complete derivation chain for each edited tensor. This fork does not certify that every upstream right or redistribution notice is fully resolved. The local extraction manifest records the precise donor commit and tensor hashes.
+
+The mechanism was informed by the public MiaAI-Lab recipe named in the [README comparison](../README.md#other-glm-53-flash-recipes-for-dgx-spark-systems). No Mia code, scripts, EXL3 runtime, model files, tests or document text are included. No AGPL-derived code is added by this feature. AGPL itself is not a prohibition on commercial use.
+
+The overlay is a software and model experiment, not a legal, medical, safety or clinical certification. Operators must review the source licenses, model terms and their own deployment obligations. The built container also retains the separate licenses of its bundled dependencies.

@@ -91,6 +91,9 @@ def command(profile, config_path, rank, name, cache=None):
         f"{ROOT / 'state/tp2-runtime-cache'}:/root/.cache",
     ]
     derived = settings.derived_checkpoint(profile)
+    overlay = settings.weight_overlay(profile)
+    if overlay:
+        args += ["-v", f"{Path(overlay['path']).resolve()}:/weight-overlay:ro"]
     if derived:
         args += ["-v", f"{derived['path']}:/derived:ro"]
         for overlay in derived["overlays"]:
@@ -185,6 +188,11 @@ def image_capability_checks(profile, image, *, recovery=False):
         ("lpa_worker", "GLM53_LPA_API=2", profile["lpa"]["enabled"]),
         ("apc_lpa_support", "GLM53_APC_LPA_API=1", settings.apc_lpa_enabled(profile)),
         ("reference_attention", "GLM53_REFERENCE_ATTENTION=1", True),
+        (
+            "weight_overlay_support",
+            "GLM53_BF16_OPROJ_OVERLAY_API=1",
+            settings.weight_overlay(profile) is not None,
+        ),
         (
             "moe_order_support",
             # 1 also names the image whose sort mis-sized its buffer (46cd464), so
@@ -289,6 +297,23 @@ def preflight(profile, config_path, rank, *, check_memory=True, recovery=False):
         "num_hidden_layers"
     ] == MODEL_LAYERS and not metadata.get("_test_fixture_only")
     checks.update(derived_checks(profile, metadata))
+    overlay = settings.weight_overlay(profile)
+    if overlay:
+        from .runtime.weight_overlay import verify_assets
+
+        checks["overlay_base_nvfp4"] = (
+            metadata.get("quantization_config", {}).get("quant_algo") == "NVFP4"
+        )
+        try:
+            report = verify_assets(
+                overlay["path"],
+                overlay["manifest_sha256"],
+                lock["revision"],
+                overlay["donor_revision"],
+            )
+            checks["overlay_files"] = report["tensor_count"] == 30
+        except (OSError, ValueError, KeyError, TypeError):
+            checks["overlay_files"] = False
     if profile["mtp"]["enabled"] and not settings.derived_checkpoint(profile):
         view = metadata.get("_local_mtp_metadata", {})
         checks["mtp_view"] = (

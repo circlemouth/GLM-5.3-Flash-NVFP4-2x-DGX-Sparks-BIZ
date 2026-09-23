@@ -13,6 +13,7 @@
 | Contributing | CPU検査、公開監査、貢献の規則 | [EN](../CONTRIBUTING.md) | [JA](../CONTRIBUTING.ja.md) |
 | Changelog | 変更履歴と版ごとの検証状態 | [EN](../CHANGELOG.md) | [JA](../CHANGELOG.ja.md)（1.6.0から） |
 | リポジトリ指示 | このcheckoutを編集するAIエージェント・運用者向けの規則 | [EN](../AGENTS.md) | — |
+| 任意のBF16 o_proj overlay | 準備、設定、出所、受入境界 | [Overlay](abliteration.md)、[Licensing](abliteration-licensing.md)、[Validation](abliteration-validation.md) | [Overlay](abliteration.ja.md)、[ライセンス](abliteration-licensing.ja.md)、[検証](abliteration-validation.ja.md) |
 | ライセンス・通知 | Apache-2.0本文、帰属、第三者の出所 | [LICENSE](../LICENSE)、[NOTICE](../NOTICE)、[THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md)、[LICENSES/](../LICENSES/) | — |
 
 ## 導入・運用
