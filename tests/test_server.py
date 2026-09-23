@@ -861,6 +861,32 @@ class ServerConfigTests(unittest.TestCase):
         self.assertNotIn("--rm", args)
         self.assertNotIn("--privileged", args)
 
+    def test_command_passes_head_api_key_by_environment_name_only(self):
+        with patch.dict("os.environ", {"VLLM_API_KEY": "test-secret-key"}):
+            head = server.command(
+                self.profile, ROOT / "state/server.toml", 0, "test-head"
+            )
+            worker = server.command(
+                self.profile, ROOT / "state/server.toml", 1, "test-worker"
+            )
+        self.assertIn("VLLM_API_KEY", head)
+        self.assertNotIn("test-secret-key", head)
+        self.assertNotIn("VLLM_API_KEY", worker)
+
+    def test_thinking_off_requires_a_verified_template(self):
+        self.profile["generation"]["reasoning_effort"] = "off"
+        with self.assertRaisesRegex(ValueError, "requires api.chat_template"):
+            config.validate(self.profile)
+        self.profile["generation"]["reasoning_effort"] = "low"
+        with self.assertRaisesRegex(ValueError, "thinking off requires"):
+            config.request_body(
+                self.profile,
+                {
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "reasoning_effort": "off",
+                },
+            )
+
     def derived(self, root, real=False):
         overlay = root / "kda-quant.py"
         overlay.write_text("x = 1  # kda-quant-overlay\n", encoding="utf-8")
@@ -1148,7 +1174,12 @@ class ServerConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             body["chat_template_kwargs"],
-            {"reasoning_effort": "low", "clear_thinking": True},
+            {
+                "reasoning_effort": "low",
+                "enable_thinking": True,
+                "thinking": True,
+                "clear_thinking": True,
+            },
         )
         spec = config.lpa_request(self.profile, 100)
         self.assertEqual(spec["mode"], "off")

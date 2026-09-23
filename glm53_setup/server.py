@@ -13,7 +13,7 @@ from collections import namedtuple
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import agreement, capacity, host, model_http, mojibake, warmup
+from . import agreement, capacity, chat_template, host, model_http, mojibake, warmup
 from . import server_config as settings
 from .config import MODEL_LAYERS, ROOT, load_lock
 from .host import available_gib
@@ -31,6 +31,15 @@ IMAGE_REFERENCE = "/usr/local/lib/python3.12/dist-packages/glm53_reference.py"
 
 def projector_path(profile, config_path):
     return (config_path.parent / profile["lpa"]["projector"]).resolve()
+
+
+def chat_template_path(profile, config_path):
+    configured = Path(profile["api"]["chat_template"])
+    if not configured.is_absolute():
+        configured = config_path.parent / configured
+    return chat_template.verify_derived(
+        configured, profile["api"]["chat_template_sha256"]
+    )
 
 
 def model_path(profile, cache):
@@ -102,6 +111,9 @@ def command(profile, config_path, rank, name, cache=None):
     if profile["lpa"]["enabled"]:
         target = "/lpa/projector.pt"
         args += ["-v", f"{projector_path(profile, config_path)}:{target}:ro"]
+    if "chat_template" in profile["api"]:
+        target = "/opt/glm53/chat_template.jinja"
+        args += ["-v", f"{chat_template_path(profile, config_path)}:{target}:ro"]
     if profile["validation"].get("memory_probe"):
         # The probe is newer than the image; mount the checkout's copy.
         source = ROOT / "glm53_setup/runtime/memory_probe.py"
@@ -128,15 +140,20 @@ def command(profile, config_path, rank, name, cache=None):
         args += ["-v", f"{ROOT / 'records/profiles' / name}:/profiles"]
     for key, value in settings.environment(profile, rank).items():
         args += ["-e", f"{key}={value}"]
+    if rank == 0 and os.environ.get("VLLM_API_KEY"):
+        args += ["-e", "VLLM_API_KEY"]
+    serve = settings.serve_args(
+        profile,
+        rank,
+        "/derived" if derived else "/hf/" + model.relative_to(cache).as_posix(),
+    )
+    if "chat_template" in profile["api"]:
+        serve += ["--chat-template", "/opt/glm53/chat_template.jinja"]
     return args + [
         "--entrypoint",
         "vllm",
         settings.selected_image(profile),
-        *settings.serve_args(
-            profile,
-            rank,
-            "/derived" if derived else "/hf/" + model.relative_to(cache).as_posix(),
-        ),
+        *serve,
     ]
 
 
