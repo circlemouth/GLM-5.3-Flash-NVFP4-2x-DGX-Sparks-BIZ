@@ -887,6 +887,37 @@ class ServerConfigTests(unittest.TestCase):
                 },
             )
 
+    def test_thinking_template_mount_and_off_request(self):
+        self.profile["api"]["chat_template"] = "/tmp/checked-template.jinja"
+        self.profile["api"]["chat_template_sha256"] = "a" * 64
+        with patch.object(
+            server.chat_template,
+            "verify_derived",
+            return_value=Path("/tmp/checked-template.jinja"),
+        ) as verified:
+            args = server.command(
+                self.profile, ROOT / "state/server.toml", 0, "test-head"
+            )
+        verified.assert_called_once_with(
+            Path("/tmp/checked-template.jinja"), "a" * 64
+        )
+        self.assertIn(
+            "/tmp/checked-template.jinja:/opt/glm53/chat_template.jinja:ro", args
+        )
+        self.assertEqual(
+            args[args.index("--chat-template") + 1],
+            "/opt/glm53/chat_template.jinja",
+        )
+        body = config.request_body(
+            self.profile,
+            {
+                "messages": [{"role": "user", "content": "hello"}],
+                "reasoning_effort": "off",
+            },
+        )
+        self.assertNotIn("reasoning_effort", body)
+        self.assertFalse(body["chat_template_kwargs"]["thinking"])
+
     def derived(self, root, real=False):
         overlay = root / "kda-quant.py"
         overlay.write_text("x = 1  # kda-quant-overlay\n", encoding="utf-8")
