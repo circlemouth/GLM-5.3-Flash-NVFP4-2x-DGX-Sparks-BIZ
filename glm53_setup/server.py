@@ -13,7 +13,7 @@ from collections import namedtuple
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import agreement, capacity, host, model_http, mojibake, warmup
+from . import agreement, capacity, chat_template, host, model_http, mojibake, warmup
 from . import server_config as settings
 from .config import MODEL_LAYERS, ROOT, load_lock
 from .host import available_gib
@@ -31,6 +31,15 @@ IMAGE_REFERENCE = "/usr/local/lib/python3.12/dist-packages/glm53_reference.py"
 
 def projector_path(profile, config_path):
     return (config_path.parent / profile["lpa"]["projector"]).resolve()
+
+
+def chat_template_path(profile, config_path):
+    configured = Path(profile["api"]["chat_template"])
+    if not configured.is_absolute():
+        configured = config_path.parent / configured
+    return chat_template.verify_derived(
+        configured, profile["api"]["chat_template_sha256"]
+    )
 
 
 def model_path(profile, cache):
@@ -91,6 +100,9 @@ def command(profile, config_path, rank, name, cache=None):
         f"{ROOT / 'state/tp2-runtime-cache'}:/root/.cache",
     ]
     derived = settings.derived_checkpoint(profile)
+    overlay = settings.weight_overlay(profile)
+    if overlay:
+        args += ["-v", f"{Path(overlay['path']).resolve()}:/weight-overlay:ro"]
     if derived:
         args += ["-v", f"{derived['path']}:/derived:ro"]
         for overlay in derived["overlays"]:
@@ -99,6 +111,9 @@ def command(profile, config_path, rank, name, cache=None):
     if profile["lpa"]["enabled"]:
         target = "/lpa/projector.pt"
         args += ["-v", f"{projector_path(profile, config_path)}:{target}:ro"]
+    if "chat_template" in profile["api"]:
+        target = "/opt/glm53/chat_template.jinja"
+        args += ["-v", f"{chat_template_path(profile, config_path)}:{target}:ro"]
     if profile["validation"].get("memory_probe"):
         # The probe is newer than the image; mount the checkout's copy.
         source = ROOT / "glm53_setup/runtime/memory_probe.py"
@@ -125,15 +140,20 @@ def command(profile, config_path, rank, name, cache=None):
         args += ["-v", f"{ROOT / 'records/profiles' / name}:/profiles"]
     for key, value in settings.environment(profile, rank).items():
         args += ["-e", f"{key}={value}"]
+    if rank == 0 and os.environ.get("VLLM_API_KEY"):
+        args += ["-e", "VLLM_API_KEY"]
+    serve = settings.serve_args(
+        profile,
+        rank,
+        "/derived" if derived else "/hf/" + model.relative_to(cache).as_posix(),
+    )
+    if "chat_template" in profile["api"]:
+        serve += ["--chat-template", "/opt/glm53/chat_template.jinja"]
     return args + [
         "--entrypoint",
         "vllm",
         settings.selected_image(profile),
-        *settings.serve_args(
-            profile,
-            rank,
-            "/derived" if derived else "/hf/" + model.relative_to(cache).as_posix(),
-        ),
+        *serve,
     ]
 
 
@@ -185,6 +205,11 @@ def image_capability_checks(profile, image, *, recovery=False):
         ("lpa_worker", "GLM53_LPA_API=2", profile["lpa"]["enabled"]),
         ("apc_lpa_support", "GLM53_APC_LPA_API=1", settings.apc_lpa_enabled(profile)),
         ("reference_attention", "GLM53_REFERENCE_ATTENTION=1", True),
+        (
+            "weight_overlay_support",
+            "GLM53_BF16_OPROJ_OVERLAY_API=1",
+            settings.weight_overlay(profile) is not None,
+        ),
         (
             "moe_order_support",
             # 1 also names the image whose sort mis-sized its buffer (46cd464), so
@@ -289,6 +314,23 @@ def preflight(profile, config_path, rank, *, check_memory=True, recovery=False):
         "num_hidden_layers"
     ] == MODEL_LAYERS and not metadata.get("_test_fixture_only")
     checks.update(derived_checks(profile, metadata))
+    overlay = settings.weight_overlay(profile)
+    if overlay:
+        from .runtime.weight_overlay import verify_assets
+
+        checks["overlay_base_nvfp4"] = (
+            metadata.get("quantization_config", {}).get("quant_algo") == "NVFP4"
+        )
+        try:
+            report = verify_assets(
+                overlay["path"],
+                overlay["manifest_sha256"],
+                lock["revision"],
+                overlay["donor_revision"],
+            )
+            checks["overlay_files"] = report["tensor_count"] == 30
+        except (OSError, ValueError, KeyError, TypeError):
+            checks["overlay_files"] = False
     if profile["mtp"]["enabled"] and not settings.derived_checkpoint(profile):
         view = metadata.get("_local_mtp_metadata", {})
         checks["mtp_view"] = (

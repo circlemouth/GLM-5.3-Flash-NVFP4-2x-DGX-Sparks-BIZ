@@ -569,6 +569,41 @@ def kernel_hash_differences(ranks):
 
 
 class MemoryProbeWorker:
+    def o_proj_sha256(self):
+        """Read back BF16 o_proj bytes from both loaded models in bounded chunks.
+
+        This diagnostic returns names, shapes and digests only. It is available
+        only when the validation worker extension is explicitly enabled.
+        """
+        import hashlib
+        import re
+
+        import torch
+
+        rows = []
+        for prefix, model in probe_models(self, torch.nn.Module).items():
+            for name, parameter in model.named_parameters():
+                if not re.search(r"(?:^|\.)o_proj\.weight$", name):
+                    continue
+                layer = re.search(r"(?:^|\.)layers\.(\d+)\.", name)
+                if not prefix and (layer is None or int(layer.group(1)) not in {*range(15, 46)}):
+                    continue
+                if parameter.dtype != torch.bfloat16 or parameter.ndim != 2:
+                    raise ValueError(f"Unexpected o_proj parameter type: {prefix}{name}")
+                digest = hashlib.sha256()
+                for first in range(0, parameter.shape[0], 64):
+                    chunk = parameter[first : first + 64].detach().contiguous()
+                    digest.update(chunk.view(torch.uint8).cpu().numpy().tobytes())
+                rows.append(
+                    {
+                        "name": prefix + name,
+                        "shape": list(parameter.shape),
+                        "dtype": "BF16",
+                        "sha256": digest.hexdigest(),
+                    }
+                )
+        return {"rank": self.rank, "rows": rows}
+
     def trace_begin(self, pattern=None, inputs=False, sync=False, functions=True):
         """Fingerprint what the traced modules take and return in what runs next.
 

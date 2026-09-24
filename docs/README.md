@@ -14,6 +14,7 @@ Every document has one role; other documents link to it instead of repeating its
 | Changelog | Change history and validation status by release | [EN](../CHANGELOG.md) | [JA](../CHANGELOG.ja.md) (from 1.6.0) |
 | Repository instructions | Rules for AI agents and operators editing this checkout | [EN](../AGENTS.md) | — |
 | Licensing and notices | Apache-2.0 text, attribution, third-party provenance | [LICENSE](../LICENSE), [NOTICE](../NOTICE), [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md), [LICENSES/](../LICENSES/) | — |
+| Optional BF16 o_proj overlay | Preparation, configuration, provenance and acceptance boundary | [Overlay](abliteration.md), [Licensing](abliteration-licensing.md), [Validation](abliteration-validation.md) | [Overlay](abliteration.ja.md), [Licensing](abliteration-licensing.ja.md), [Validation](abliteration-validation.ja.md) |
 
 ## Deploy and operate
 

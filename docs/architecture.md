@@ -23,12 +23,13 @@ Order is part of the contract in two places. `VALIDATORS` runs the profile rules
 |---|---|
 | `glm53_setup/__main__.py` | Fixed command dispatch; no dynamic user-supplied module loading |
 | `glm53_setup/config.py` | Checkout paths and validated pinned configuration |
-| `glm53_setup/server.py`, `server_config.py`, `capacity.py`, `warmup.py`, `mojibake.py`, `agreement.py` | Launch/client orchestration, categorized TOML settings, KV boot-line decomposition, the post-readiness request ladder, the Japanese/Korean broken-character check and the per-token agreement with a reference run (`server agreement`) |
+| `glm53_setup/server.py`, `server_config.py`, `capacity.py`, `warmup.py`, `mojibake.py`, `agreement.py`, `chat_template.py`, `thinking.py` | Launch/client orchestration, categorized TOML settings, KV boot-line decomposition, the post-readiness request ladder, Japanese/Korean text checks, per-token agreement with a reference run (`server agreement`), and request-scoped thinking control |
 | `glm53_setup/host.py` | Host-side helpers shared by the launcher: site validation, serve arguments, fabric checks, snapshot resolution, subprocess execution |
 | `glm53_setup/download.py`, `verify_download.py`, `images.py`, `build_reference.py` | Asset preparation (pinned download, checksum verification that waits for the downloader, base-image inspection, reference-image build) and guarded local operations |
 | `glm53_setup/cluster.py`, `switch.py`, `launch_assets.py`, `fabric.py` | Two-rank pre-stop checks, owned switch/recovery transaction, read-only launch identities and RoCE rail checks ([launch contracts](launch-safety.md)) |
 | `glm53_setup/model_http.py`, `io.py` | Model-API-scoped HTTP transport that never follows redirects; durable local state helpers |
 | `glm53_setup/runtime/pinned_patch.py`, `patch_*.py` | The source-pinned vLLM patches the image build applies: `pinned_patch` holds what they share (the hash gate on the pinned file, the `--package`/`--check` command, the record written beside the package); each `patch_*` module states its target, its pin and its anchors as a pure `patch_text(text)` that refuses a drifted or already patched source |
+| `glm53_setup/runtime/weight_overlay.py` | Optional manifest-verified BF16 tensor replacement in the pinned main and MTP weight iterators; off by default ([overlay guide](abliteration.md)) |
 | `glm53_setup/runtime/reference_attention.py`, `patch_nope_reference.py`, `fa2_attention.py` | Candidate-preserving eager NoPE MLA reference, its source-pinned installation, and the FA2 prefill path (`runtime.fa2_attention`) |
 | `glm53_setup/runtime/candidate_order.py` | Canonical logical candidate order at the shared sparse-MLA boundary ([candidate order](candidate-order.md)) |
 | `glm53_setup/runtime/moe_token_order.py`, `patch_moe_order.py` | One token order inside each expert before the Marlin MoE kernel (`runtime.canonical_moe_order`) and its source-pinned patch |
@@ -52,7 +53,7 @@ Order is part of the contract in two places. `VALIDATORS` runs the profile rules
 | `docker/` | Image construction; base digest supplied from the lock by the build command |
 | `requirements/` | Fixed host-tool dependencies |
 | `tests/` | CPU contracts |
-| `tools/` | `check_publication.py` (publication audit), `release_notes.py` (the Changelog section a tag publishes), `kernel_hashes.py` (the indexer's kernels hashed inside both serving workers), `assess_benchmark.py`, `check_prefix_cache.py`, `decode_check.py`, `decode_divergence.py` and `weight_digest.py` (the decode check and the weight digest after a switch, [launch contracts](launch-safety.md#after-a-switch-the-decode-check)), `nccl_probe.py`, `prepare_mtp_view.py` |
+| `tools/` | `check_publication.py` (publication audit), `release_notes.py` (the Changelog section a tag publishes), `kernel_hashes.py` (the indexer's kernels hashed inside both serving workers), `assess_benchmark.py`, `check_prefix_cache.py`, `decode_check.py`, `decode_divergence.py` and `weight_digest.py` (the decode check and the weight digest after a switch, [launch contracts](launch-safety.md#after-a-switch-the-decode-check)), `nccl_probe.py`, `prepare_mtp_view.py`, `prepare_abliteration.py` (verified range extraction), `verify_abliteration_loaded.py` (rank-local loaded-weight comparison), `derive_thinking_template.py` (pinned template derivation) |
 | `.github/workflows/` | CI (CPU tests, Ruff, publication audit on Linux and Windows) and the tag-driven GitHub Release |
 | `LICENSES/` | Preserved upstream license texts |
 | `state/`, `records/` | Local mutable state and experiment evidence, excluded from distribution |

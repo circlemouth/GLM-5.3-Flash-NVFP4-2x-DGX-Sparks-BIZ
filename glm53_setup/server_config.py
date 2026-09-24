@@ -9,7 +9,7 @@ import re
 import tomllib
 from pathlib import Path, PurePosixPath
 
-from . import host
+from . import host, thinking
 from .config import MODEL_LAYERS, ROOT, load_lock
 
 
@@ -57,6 +57,7 @@ OPTIONAL_KEYS = {
             "vision",
             "nccl_channels",
             "derived_checkpoint",
+            "weight_overlay",
             "canonical_moe_order",
             "stable_indexer_topk",
             "decode_graphs",
@@ -68,7 +69,9 @@ OPTIONAL_KEYS = {
     "server.cache": frozenset(
         {"prefix_cache_retention_interval", "mm_processor_cache_gb"}
     ),
-    "server.api": frozenset({"prompt_tokens_details", "dev_endpoints"}),
+    "server.api": frozenset(
+        {"prompt_tokens_details", "dev_endpoints", "chat_template", "chat_template_sha256"}
+    ),
     "server.validation": frozenset({"memory_probe"}),
     "server.resources": frozenset({"stall_seconds"}),
     "server.generation": frozenset({"warmup", "warmup_long_tokens"}),
@@ -119,6 +122,26 @@ def check_schema(profile):
 
 def check_optional_shapes(profile):
     """Type-check the keys a profile may omit, and the pairs they exclude."""
+    template_keys = {
+        key
+        for key in ("chat_template", "chat_template_sha256")
+        if key in profile["api"]
+    }
+    if template_keys not in (set(), {"chat_template", "chat_template_sha256"}):
+        raise ValueError(
+            "api.chat_template and api.chat_template_sha256 must be set together"
+        )
+    if template_keys:
+        template = profile["api"]["chat_template"]
+        digest = profile["api"]["chat_template_sha256"]
+        if (
+            type(template) is not str
+            or not template
+            or any(character in template for character in "\x00\r\n")
+        ):
+            raise ValueError("api.chat_template must be a nonempty single-line path")
+        if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("api.chat_template_sha256 must be a SHA-256 digest")
     if "prefix_cache_retention_interval" in profile["cache"]:
         interval = profile["cache"]["prefix_cache_retention_interval"]
         if interval != "dense" and (type(interval) is not int or interval < 0):
@@ -140,6 +163,8 @@ def check_optional_shapes(profile):
             raise ValueError("runtime.nccl_channels must be a positive integer")
     if "derived_checkpoint" in profile["runtime"]:
         validate_derived(profile["runtime"]["derived_checkpoint"])
+    if "weight_overlay" in profile["runtime"]:
+        validate_weight_overlay(profile)
     if type(profile["runtime"].get("canonical_moe_order", True)) is not bool:
         raise ValueError("runtime.canonical_moe_order must be true or false")
     if type(profile["runtime"].get("stable_indexer_topk", True)) is not bool:
@@ -296,10 +321,14 @@ def check_generation(profile):
         >= profile["context"]["max_model_len"]
     ):
         raise ValueError("warmup_long_tokens plus max_tokens must fit the context")
-    if profile["generation"]["reasoning_effort"] not in {"low", "high", "max"}:
-        raise ValueError(
-            "Use a supported reasoning_effort; thinking-off is unqualified"
-        )
+    thinking._mode(
+        profile["generation"]["reasoning_effort"], "generation.reasoning_effort"
+    )
+    if (
+        profile["generation"]["reasoning_effort"] == "off"
+        and "chat_template" not in profile["api"]
+    ):
+        raise ValueError("generation.reasoning_effort=off requires api.chat_template")
 
 
 def check_speculation(profile):
@@ -445,6 +474,42 @@ def validate_derived(derived):
         raise ValueError(f"{name}.overlays names a target twice")
 
 
+def weight_overlay(profile):
+    value = profile["runtime"].get("weight_overlay")
+    return value if value and value["enabled"] else None
+
+
+def validate_weight_overlay(profile):
+    value = profile["runtime"]["weight_overlay"]
+    if not isinstance(value, dict) or value.keys() != {
+        "enabled",
+        "path",
+        "manifest_sha256",
+        "donor_revision",
+    }:
+        raise ValueError(
+            "runtime.weight_overlay requires enabled, path, donor_revision and manifest_sha256"
+        )
+    if type(value["enabled"]) is not bool:
+        raise ValueError("runtime.weight_overlay.enabled must be true or false")
+    if (
+        not isinstance(value["path"], str)
+        or not PurePosixPath(value["path"]).is_absolute()
+    ):
+        raise ValueError("runtime.weight_overlay.path must be absolute")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(value["manifest_sha256"])):
+        raise ValueError("runtime.weight_overlay.manifest_sha256 must be SHA-256")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(value["donor_revision"])):
+        raise ValueError("runtime.weight_overlay.donor_revision must be a commit")
+    if value["enabled"]:
+        if derived_checkpoint(profile):
+            raise ValueError(
+                "BF16 overlay does not support a derived or AXL checkpoint"
+            )
+        if profile["api"]["served_model_name"] == "glm-5.3-flash-nvidia":
+            raise ValueError("Overlay requires a distinct served_model_name")
+
+
 def site(profile, rank):
     if type(rank) is not int or rank not in (0, 1):
         raise ValueError("rank must be 0 or 1")
@@ -489,6 +554,12 @@ def environment(profile, rank):
         # removes one cause, not every one: a new launch is checked, not assumed.
         TRITON_CACHE_AUTOTUNING="1",
     )
+    overlay = weight_overlay(profile)
+    if overlay:
+        result["GLM53_WEIGHT_OVERLAY_MANIFEST"] = "/weight-overlay/manifest.json"
+        result["GLM53_WEIGHT_OVERLAY_SHA256"] = overlay["manifest_sha256"]
+        result["GLM53_WEIGHT_OVERLAY_BASE_REVISION"] = load_lock()["revision"]
+        result["GLM53_WEIGHT_OVERLAY_DONOR_REVISION"] = overlay["donor_revision"]
     if "cuda_allocator_conf" in profile["runtime"]:
         result["PYTORCH_CUDA_ALLOC_CONF"] = profile["runtime"]["cuda_allocator_conf"]
     if "nccl_channels" in profile["runtime"]:
@@ -774,11 +845,13 @@ def request_body(profile, request):
     ):
         raise ValueError("Request model does not match server profile")
     body["model"] = profile["api"]["served_model_name"]
-    for key in ("temperature", "max_tokens", "reasoning_effort"):
+    for key in ("temperature", "max_tokens"):
         body.setdefault(key, profile["generation"][key])
     body.setdefault("seed", profile["runtime"]["seed"])
-    template = body.setdefault("chat_template_kwargs", {})
-    template.setdefault("reasoning_effort", body["reasoning_effort"])
+    body = thinking.normalize_request(body, profile["generation"]["reasoning_effort"])
+    template = body["chat_template_kwargs"]
+    if not template["thinking"] and "chat_template" not in profile["api"]:
+        raise ValueError("thinking off requires api.chat_template")
     template.setdefault("clear_thinking", profile["generation"]["clear_thinking"])
     return body
 
