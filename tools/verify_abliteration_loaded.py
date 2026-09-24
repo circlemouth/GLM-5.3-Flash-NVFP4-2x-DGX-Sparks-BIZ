@@ -60,13 +60,25 @@ def expected_shard_sha256(path, key, loaded_shape, rank):
         first_row, rows, first_col, cols = 0, shape[0], 0, shape[1]
         placement = "replicated"
     elif loaded_shape == [shape[0] // 2, shape[1]] and shape[0] % 2 == 0:
-        first_row, rows, first_col, cols = rank * loaded_shape[0], loaded_shape[0], 0, shape[1]
+        first_row, rows, first_col, cols = (
+            rank * loaded_shape[0],
+            loaded_shape[0],
+            0,
+            shape[1],
+        )
         placement = "row_split"
     elif loaded_shape == [shape[0], shape[1] // 2] and shape[1] % 2 == 0:
-        first_row, rows, first_col, cols = 0, shape[0], rank * loaded_shape[1], loaded_shape[1]
+        first_row, rows, first_col, cols = (
+            0,
+            shape[0],
+            rank * loaded_shape[1],
+            loaded_shape[1],
+        )
         placement = "column_split"
     else:
-        raise ValueError(f"Loaded shape {loaded_shape} cannot be a TP=2 BF16 shard of {shape}")
+        raise ValueError(
+            f"Loaded shape {loaded_shape} cannot be a TP=2 BF16 shard of {shape}"
+        )
     digest = hashlib.sha256()
     row_bytes = shape[1] * 2
     chunk_bytes = cols * 2
@@ -95,30 +107,63 @@ def loaded_parameter(rank_rows, layer):
     matches = [row for row in rank_rows if suffix.search(row["name"])]
     if layer == 45 and not matches:
         matches = [
-            row for row in rank_rows
+            row
+            for row in rank_rows
             if re.fullmatch(
-                r"[^:]+:(?:model\.)?layers\.0\.self_attn\.o_proj\.weight",
+                r"[^:]+:(?:model\.)?layers\.(?:0|45\.mtp_block)\.self_attn\.o_proj\.weight",
                 row["name"],
             )
         ]
     if len(matches) != 1:
-        raise ValueError(f"Expected one loaded o_proj for layer {layer}, found {len(matches)}")
+        raise ValueError(
+            f"Expected one loaded o_proj for layer {layer}, found {len(matches)}"
+        )
     row = matches[0]
-    if row.get("dtype") != "BF16" or not re.fullmatch(r"[0-9a-f]{64}", row.get("sha256", "")):
+    if row.get("dtype") != "BF16" or not re.fullmatch(
+        r"[0-9a-f]{64}", row.get("sha256", "")
+    ):
         raise ValueError(f"Invalid loaded o_proj digest for layer {layer}")
     return row
 
 
-def verify(loaded, *, source, assets, snapshot, manifest_sha256, base_revision, donor_revision, mtp):
-    rows = read_manifest(assets / "manifest.json", manifest_sha256, base_revision, donor_revision)
+def selected_layers(source, mtp, only_layers=None):
+    expected = (*range(15, 44), 44) if source == "base" else tuple(range(15, 44))
+    if mtp:
+        expected += (45,)
+    if only_layers is None:
+        return expected
+    if (
+        not only_layers
+        or len(set(only_layers)) != len(only_layers)
+        or not set(only_layers) <= set(expected)
+    ):
+        raise ValueError("Requested readback layers are outside the selected source")
+    return tuple(layer for layer in expected if layer in only_layers)
+
+
+def verify(
+    loaded,
+    *,
+    source,
+    assets,
+    snapshot,
+    manifest_sha256,
+    base_revision,
+    donor_revision,
+    mtp,
+    only_layers=None,
+):
+    rows = read_manifest(
+        assets / "manifest.json", manifest_sha256, base_revision, donor_revision
+    )
     if source == "donor":
         verify_assets(assets, manifest_sha256, base_revision, donor_revision)
     index = {}
     if source == "base":
-        index = json.loads((snapshot / "model.safetensors.index.json").read_text())["weight_map"]
-    expected_layers = (*range(15, 44), 44) if source == "base" else tuple(range(15, 44))
-    if mtp:
-        expected_layers += (45,)
+        index = json.loads((snapshot / "model.safetensors.index.json").read_text())[
+            "weight_map"
+        ]
+    expected_layers = selected_layers(source, mtp, only_layers)
     if {entry.get("rank") for entry in loaded} != {0, 1} or len(loaded) != 2:
         raise ValueError("Readback must contain exactly ranks 0 and 1")
     results = []
@@ -130,23 +175,29 @@ def verify(loaded, *, source, assets, snapshot, manifest_sha256, base_revision, 
         for layer in expected_layers:
             actual = loaded_parameter(rank_rows, layer)
             path, key = source_for_layer(layer, source, assets, snapshot, index, rows)
-            expected, placement = expected_shard_sha256(path, key, actual["shape"], rank)
-            results.append({
-                "rank": rank,
-                "layer": layer,
-                "name": actual["name"],
-                "placement": placement,
-                "expected_sha256": expected,
-                "loaded_sha256": actual["sha256"],
-                "match": expected == actual["sha256"],
-            })
+            expected, placement = expected_shard_sha256(
+                path, key, actual["shape"], rank
+            )
+            results.append(
+                {
+                    "rank": rank,
+                    "layer": layer,
+                    "name": actual["name"],
+                    "placement": placement,
+                    "expected_sha256": expected,
+                    "loaded_sha256": actual["sha256"],
+                    "match": expected == actual["sha256"],
+                }
+            )
     return results
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, help="Live profile for worker readback")
-    parser.add_argument("--loaded-json", type=Path, help="Saved worker readback instead of live RPC")
+    parser.add_argument(
+        "--loaded-json", type=Path, help="Saved worker readback instead of live RPC"
+    )
     parser.add_argument("--source", choices=("base", "donor"), required=True)
     parser.add_argument("--assets", type=Path, required=True)
     parser.add_argument("--base-snapshot", type=Path, required=True)
@@ -154,6 +205,13 @@ def main(argv=None):
     parser.add_argument("--base-revision", required=True)
     parser.add_argument("--donor-revision", required=True)
     parser.add_argument("--mtp", action="store_true")
+    parser.add_argument(
+        "--only-layer",
+        type=int,
+        action="append",
+        dest="only_layers",
+        help="Limit comparison to one source layer; repeat for more than one",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     if bool(args.config) == bool(args.loaded_json):
@@ -174,12 +232,20 @@ def main(argv=None):
         base_revision=args.base_revision,
         donor_revision=args.donor_revision,
         mtp=args.mtp,
+        only_layers=args.only_layers,
     )
-    result = {"source": args.source, "mtp": args.mtp, "readback": loaded, "rows": results}
+    result = {
+        "source": args.source,
+        "mtp": args.mtp,
+        "readback": loaded,
+        "rows": results,
+    }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     matches = sum(row["match"] for row in results)
-    print(f"o_proj readback: {matches}/{len(results)} rank-local tensors match {args.source}")
+    print(
+        f"o_proj readback: {matches}/{len(results)} rank-local tensors match {args.source}"
+    )
     return 0 if matches == len(results) else 1
 
 

@@ -8,10 +8,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.verify_abliteration_loaded import expected_shard_sha256, loaded_parameter
+from tools.verify_abliteration_loaded import (
+    expected_shard_sha256,
+    loaded_parameter,
+    selected_layers,
+)
 
 
 class RankReadbackTests(unittest.TestCase):
+    def test_base_l44_can_be_checked_without_rechecking_overlay_targets(self):
+        self.assertEqual(selected_layers("base", True, [44]), (44,))
+        self.assertEqual(len(selected_layers("donor", True)), 30)
+        with self.assertRaisesRegex(ValueError, "outside the selected source"):
+            selected_layers("donor", True, [44])
+        with self.assertRaisesRegex(ValueError, "outside the selected source"):
+            selected_layers("base", True, [44, 44])
+
     def test_exact_full_row_and_column_shards(self):
         key = "model.language_model.layers.15.self_attn.o_proj.weight"
         # Four rows by four BF16 elements; the two-byte words are distinct.
@@ -23,7 +35,9 @@ class RankReadbackTests(unittest.TestCase):
             path = Path(tmp) / "part.safetensors"
             path.write_bytes(struct.pack("<Q", len(header)) + header + data)
             full, placement = expected_shard_sha256(path, key, [4, 4], 0)
-            self.assertEqual((full, placement), (hashlib.sha256(data).hexdigest(), "replicated"))
+            self.assertEqual(
+                (full, placement), (hashlib.sha256(data).hexdigest(), "replicated")
+            )
             for rank in (0, 1):
                 rows, placement = expected_shard_sha256(path, key, [2, 4], rank)
                 self.assertEqual(placement, "row_split")
@@ -32,7 +46,10 @@ class RankReadbackTests(unittest.TestCase):
                 )
                 columns, placement = expected_shard_sha256(path, key, [4, 2], rank)
                 self.assertEqual(placement, "column_split")
-                expected = b"".join(data[row * 8 + rank * 4 : row * 8 + (rank + 1) * 4] for row in range(4))
+                expected = b"".join(
+                    data[row * 8 + rank * 4 : row * 8 + (rank + 1) * 4]
+                    for row in range(4)
+                )
                 self.assertEqual(columns, hashlib.sha256(expected).hexdigest())
             with self.assertRaises(ValueError):
                 expected_shard_sha256(path, key, [3, 3], 0)
@@ -45,10 +62,16 @@ class RankReadbackTests(unittest.TestCase):
             "sha256": "a" * 64,
         }
         self.assertEqual(loaded_parameter([row], 45), row)
+        native = dict(
+            row, name="speculator:model.layers.45.mtp_block.self_attn.o_proj.weight"
+        )
+        self.assertEqual(loaded_parameter([native], 45), native)
         with self.assertRaisesRegex(ValueError, "found 2"):
             loaded_parameter([row, row], 45)
         with self.assertRaisesRegex(ValueError, "found 0"):
-            loaded_parameter([dict(row, name="draft:model.layers.1.self_attn.o_proj.weight")], 45)
+            loaded_parameter(
+                [dict(row, name="draft:model.layers.1.self_attn.o_proj.weight")], 45
+            )
 
 
 if __name__ == "__main__":
